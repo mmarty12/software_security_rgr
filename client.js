@@ -5,7 +5,6 @@ const readline = require('readline');
 const clientMessage = crypto.randomBytes(16).toString('hex');
 
 const preMasterSecret = crypto.randomBytes(16);
-console.log('pms', preMasterSecret);
 let sessionKey = null;
 
 const client = net.createConnection(3000, 'localhost', () => {
@@ -29,8 +28,11 @@ client.on('data', (data) => {
       sessionKey = crypto.createHash('sha256').update(preMasterSecret).digest();
       console.log(`Session key: ${sessionKey.toString('hex')}`);
     } else if (sessionKey) {
-      const iv = sessionKey.slice(0, 16);
-      const decipher = crypto.createDecipheriv('aes-256-ctr', sessionKey, iv);
+      const cipher = crypto.createCipheriv('aes-256-ctr', sessionKey, sessionKey.slice(0, 16));
+      const encryptedReady = cipher.update('ready', 'utf8', 'base64') + cipher.final('base64');
+      client.write(JSON.stringify({ type: 'ready', message: encryptedReady }));
+
+      const decipher = crypto.createDecipheriv('aes-256-ctr', sessionKey, sessionKey.slice(0, 16));
       const decryptedMessage = decipher.update(message.message, 'base64', 'utf8') + decipher.final('utf8');
 
       if (message.type === 'ready') {
@@ -60,8 +62,7 @@ const IOreadline = readline.createInterface({
 });
 
 function sendSecureMessage(messageObj) {
-  const iv = sessionKey.slice(0, 16);
-  const cipher = crypto.createCipheriv('aes-256-ctr', sessionKey, iv);
+  const cipher = crypto.createCipheriv('aes-256-ctr', sessionKey, sessionKey.slice(0, 16));
   const encryptedMessage = cipher.update(messageObj.message, 'utf8', 'base64') + cipher.final('base64');
   client.write(JSON.stringify({ type: 'message', message: encryptedMessage }));
 }

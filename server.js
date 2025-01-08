@@ -8,6 +8,7 @@ const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLen
 const publicKeyExport = publicKey.export({ type: 'spki', format: 'pem' });
 
 let sessionKey = null;
+let sessionEstablished = false;
 
 const server = net.createServer((socket) => {
   console.log('Client connected.');
@@ -28,25 +29,28 @@ const server = net.createServer((socket) => {
     } else if (message.type === 'premaster') {
       console.log(`Received pre-master secret: ${message.message}`);
       const preMasterSecret = crypto.privateDecrypt({ key: privateKey, padding: crypto.constants.RSA_PKCS1_PADDING }, Buffer.from(message.message, 'base64'));
-      console.log(`Decrypted pre-master secret: ${preMasterSecret.toString('base64')}`);
 
       sessionKey = crypto.createHash('sha256').update(preMasterSecret).digest();
       console.log(`Session key: ${sessionKey.toString('hex')}`);
-
       const cipher = crypto.createCipheriv('aes-256-ctr', sessionKey, sessionKey.slice(0, 16));
       const encryptedReady = cipher.update('ready', 'utf8', 'base64') + cipher.final('base64');
       socket.write(JSON.stringify({ type: 'ready', message: encryptedReady }));
-    } else if (message.type === 'message') {
-      console.log('Session established successfully!');
+    } else if (sessionKey) {
+      if (message.type === 'ready' && !sessionEstablished) {
+        console.log('Session established successfully!');
+        sessionEstablished = true;
+      }
 
-      const decipher = crypto.createDecipheriv('aes-256-ctr', sessionKey, sessionKey.slice(0, 16));
-      const decryptedMessage = decipher.update(message.message, 'base64', 'utf8') + decipher.final('utf8');
-      console.log(`Received message from client: ${decryptedMessage}`);
+      if (message.type === 'message') {
+        const decipher = crypto.createDecipheriv('aes-256-ctr', sessionKey, sessionKey.slice(0, 16));
+        const decryptedMessage = decipher.update(message.message, 'base64', 'utf8') + decipher.final('utf8');
+        console.log(`Received message from client: ${decryptedMessage}`);
 
-      const responseMessage = `Server received: '${decryptedMessage}'`;
-      const cipherResponse = crypto.createCipheriv('aes-256-ctr', sessionKey, sessionKey.slice(0, 16));
-      const encryptedResponse = cipherResponse.update(responseMessage, 'utf8', 'base64') + cipherResponse.final('base64');
-      socket.write(JSON.stringify({ type: 'message', message: encryptedResponse }));
+        const responseMessage = `Server received: '${decryptedMessage}'`;
+        const cipherResponse = crypto.createCipheriv('aes-256-ctr', sessionKey, sessionKey.slice(0, 16));
+        const encryptedResponse = cipherResponse.update(responseMessage, 'utf8', 'base64') + cipherResponse.final('base64');
+        socket.write(JSON.stringify({ type: 'message', message: encryptedResponse }));
+      }
     }
   });
 
